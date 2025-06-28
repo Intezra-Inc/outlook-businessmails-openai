@@ -1,8 +1,9 @@
 /* eslint-disable no-undef */
 import * as React from "react";
-import { DefaultButton } from "@fluentui/react";
 import Progress from "./Progress";
-import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from "openai";
+import OpenAI from "openai";
+import { generate } from "../ai";
+import { Button, Textarea, Input, Label } from "@fluentui/react-components";
 
 /* global require */
 
@@ -16,6 +17,7 @@ export interface AppState {
   startText: string;
   finalMailText: string;
   isLoading: boolean;
+  baseUrl: string;
   isGenerateBusinessMailActive: boolean;
   isSummarizeMailActive: boolean;
   summary: string;
@@ -48,6 +50,7 @@ export default class App extends React.Component<AppProps, AppState> {
       generatedText: "",
       startText: "",
       finalMailText: "",
+      baseUrl: localStorage.getItem("modelBaseUrl") ?? "",
       isLoading: false,
       isGenerateBusinessMailActive: isGenerateBusinessMailActive,
       isSummarizeMailActive: isSummarizeMailActive,
@@ -66,27 +69,30 @@ export default class App extends React.Component<AppProps, AppState> {
   generateText = async () => {
     // eslint-disable-next-line no-undef
     var current = this;
-    const configuration = new Configuration({
-      apiKey: "your-api-key",
-    });
-    const openai = new OpenAIApi(configuration);
-    current.setState({ isLoading: true });
-    const response = await openai.createChatCompletion({
-      model: "gpt-3.5-turbo",
-      messages: [
+
+    try {
+      current.setState({ isLoading: true });
+      const text = await generate(this.state.baseUrl, [
         {
           role: "system",
           content: "You are a helpful assistant that can help users to create professional business content.",
         },
-        { role: "user", content: "Turn the following text into a professional business mail: " + this.state.startText },
-      ],
-    });
-    current.setState({ isLoading: false });
-    current.setState({ generatedText: response.data.choices[0].message.content });
+        {
+          role: "user",
+          content: `Turn the following text into a professional business mail: ${this.state.startText}`,
+        },
+      ]);
+
+      current.setState({ isLoading: false });
+      current.setState({ generatedText: text });
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   insertIntoMail = () => {
     const finalText = this.state.finalMailText.length === 0 ? this.state.generatedText : this.state.finalMailText;
+
     Office.context.mailbox.item.body.setSelectedDataAsync(finalText, {
       coercionType: Office.CoercionType.Text,
     });
@@ -103,19 +109,16 @@ export default class App extends React.Component<AppProps, AppState> {
   };
 
   summarizeMail(): Promise<any> {
+    const baseUrl = this.state.baseUrl;
+
     return new Office.Promise(function (resolve, reject) {
       try {
         Office.context.mailbox.item.body.getAsync(Office.CoercionType.Text, async function (asyncResult) {
-          const configuration = new Configuration({
-            apiKey: "your-api-key",
-          });
-          const openai = new OpenAIApi(configuration);
-
           //take only the first 800 words of the mail
           const mailText = asyncResult.value.split(" ").slice(0, 800).join(" ");
 
           //create the request body
-          const messages: ChatCompletionRequestMessage[] = [
+          const text = await generate(baseUrl, [
             {
               role: "system",
               content:
@@ -123,22 +126,23 @@ export default class App extends React.Component<AppProps, AppState> {
             },
             {
               role: "user",
-              content: "Summarize the following mail thread and summarize it with a bullet list: " + mailText,
+              content: `Summarize the following mail thread and summarize it with a bullet list: ${mailText}`,
             },
-          ];
+          ]);
 
-          const response = await openai.createChatCompletion({
-            model: "gpt-3.5-turbo",
-            messages: messages,
-          });
-
-          resolve(response.data.choices[0].message.content);
+          resolve(text);
         });
       } catch (error) {
         reject(error);
       }
     });
   }
+
+  onBaseUrlChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newBaseUrl = event.target.value;
+    this.setState({ baseUrl: newBaseUrl });
+    localStorage.setItem("modelBaseUrl", newBaseUrl);
+  };
 
   ProgressSection = () => {
     if (this.state.isLoading) {
@@ -153,37 +157,29 @@ export default class App extends React.Component<AppProps, AppState> {
       return (
         <>
           <p>Briefly describe what you want to communicate in the mail:</p>
-          <textarea
+          <Textarea
             className="ms-welcome"
             onChange={(e) => this.setState({ startText: e.target.value })}
             rows={5}
             cols={40}
           />
           <p>
-            <DefaultButton
-              className="ms-welcome__action"
-              iconProps={{ iconName: "ChevronRight" }}
-              onClick={this.generateText}
-            >
-              Generate text
-            </DefaultButton>
+            <Button className="ms-welcome__action" onClick={this.generateText}>
+              Generate texts
+            </Button>
           </p>
           <this.ProgressSection />
-          <textarea
+          <Textarea
             className="ms-welcome"
-            defaultValue={this.state.generatedText}
+            value={this.state.generatedText}
             onChange={(e) => this.setState({ finalMailText: e.target.value })}
             rows={15}
             cols={40}
           />
           <p>
-            <DefaultButton
-              className="ms-welcome__action"
-              iconProps={{ iconName: "ChevronRight" }}
-              onClick={this.insertIntoMail}
-            >
+            <Button className="ms-welcome__action" onClick={this.insertIntoMail}>
               Insert into mail
-            </DefaultButton>
+            </Button>
           </p>
         </>
       );
@@ -197,15 +193,11 @@ export default class App extends React.Component<AppProps, AppState> {
       return (
         <>
           <p>Summarize mail</p>
-          <DefaultButton
-            className="ms-welcome__action"
-            iconProps={{ iconName: "ChevronRight" }}
-            onClick={this.onSummarize}
-          >
+          <Button className="ms-welcome__action" onClick={this.onSummarize}>
             Summarize mail
-          </DefaultButton>
+          </Button>
           <this.ProgressSection />
-          <textarea className="ms-welcome" defaultValue={this.state.summary} rows={15} cols={40} />
+          <Textarea className="ms-welcome" value={this.state.summary} rows={15} cols={40} />
         </>
       );
     } else {
@@ -232,27 +224,28 @@ export default class App extends React.Component<AppProps, AppState> {
           <h2 className="ms-font-xl ms-fontWeight-semilight ms-fontColor-neutralPrimary ms-u-slideUpIn20">
             Outlook AI Assistant
           </h2>
-
+          <Label htmlFor="baseUrl">Model Base Url</Label>
+          <Input id="baseUrl" value={this.state.baseUrl} onChange={this.onBaseUrlChange} />
           <p className="ms-font-l ms-fontWeight-semilight ms-fontColor-neutralPrimary ms-u-slideUpIn20">
             Choose your service:
           </p>
           <p>
-            <DefaultButton
+            <Button
               className="ms-welcome__action"
-              iconProps={{ iconName: "ChevronRight" }}
+              // iconProps={{ iconName: "ChevronRight" }}
               onClick={this.showGenerateBusinessMail}
             >
               Generate business mail
-            </DefaultButton>
+            </Button>
           </p>
           <p>
-            <DefaultButton
+            <Button
               className="ms-welcome__action"
-              iconProps={{ iconName: "ChevronRight" }}
+              // iconProps={{ iconName: "ChevronRight" }}
               onClick={this.showSummarizeMail}
             >
               Summarize mail
-            </DefaultButton>
+            </Button>
           </p>
           <div>
             <this.BusinessMailSection />

@@ -3,9 +3,9 @@
  * See LICENSE in the project root for license information.
  */
 
-/* global global, Office, self, window */
+import { generate } from "../taskpane/ai";
 
-import { Configuration, OpenAIApi } from "openai";
+/* global global, Office, self, window */
 
 Office.onReady(() => {
   // If needed, Office.js is ready to be called
@@ -26,26 +26,19 @@ function getSelectedText(): Promise<any> {
   return new Office.Promise(function (resolve, reject) {
     try {
       Office.context.mailbox.item.body.getAsync(Office.CoercionType.Text, async function (asyncResult) {
-        const configuration = new Configuration({
-          apiKey: "your-api-key",
-        });
-        const openai = new OpenAIApi(configuration);
-        const response = await openai.createChatCompletion({
-          model: "gpt-3.5-turbo",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a helpful assistant that can help users to better manage emails. The following prompt contains the whole mail thread. ",
-            },
-            {
-              role: "user",
-              content: "Summarize the following mail thread and extract the key points: " + asyncResult.value,
-            },
-          ],
-        });
+        const text = await generate("", [
+          {
+            role: "system",
+            content:
+              "You are a helpful assistant that can help users to better manage emails. The following prompt contains the whole mail thread. ",
+          },
+          {
+            role: "user",
+            content: "Summarize the following mail thread and extract the key points: " + asyncResult.value,
+          },
+        ]);
 
-        resolve(response.data.choices[0].message.content);
+        resolve(text);
       });
     } catch (error) {
       reject(error);
